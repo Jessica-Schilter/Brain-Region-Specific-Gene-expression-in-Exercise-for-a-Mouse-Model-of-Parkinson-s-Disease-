@@ -1,0 +1,598 @@
+---
+title: "final_project"
+output: html_document
+date: "2022-08-08"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE205907
+Accession: PRJNA848217 ID: 848217
+“Brain Region-Specific Gene expression in Exercise for a Mouse Model of Parkinson's Disease”
+
+do separate analysis for the two types of controls. percentage of expression. 
+
+"RNA-sequencing on 4 brain regions from control animals, MPTP-induced PD mice and MPTP-induced PD mice treated with exercise for 12 weeks were performed"
+
+I will be analyzing the above-mentioned experiment and focus on two types of samples. (Cortex and cerebellum). This is the center for memory and balance/ posture respectively. This study tested effects of 12-week treadmill exercise on Parkinson’s symptomatic mice.
+
+Control: saline, non-MPTP mice
+Control: MPTP-induced PD mice 
+Treatment: MPTP-induced PD mice treated with exercise for 12 weeks.
+
+This study has RNA-sequencing data on 4 brain regions: Cerebellum, Cortex, nigra and striatum.
+Study used the pvalue, not the adjusted pvalue.
+
+1.	Why is this experiment important to you?
+My current work focuses on Parkinson’s disease and how to target the plaques in the brain that cause it. I am interested in incorporating transcriptomics into my current work. I am also personally interested in how exercise effects the brain and diseases. Exercise is something I am passionate about, and I would like to know more about what it does to gene expression.
+
+2.	What are you hoping to discover after analyzing the data?
+I am hoping to see if expression levels of genes change in the memory and motor regions of the brain in the treated mice and if there is change in expression, what are those genes and what are their functions?
+
+3.	How many different factors are present in the experiment and how many levels in each factor? 
+first do a pca plot to see how all samples are related to each other than decide on a subset for differential expression. Chose 2 sample types to work with to simplify the experiment.
+Reference ‘in_class_week8’ R project and the book in week 12 called R for data science
+There are 4 factors in this experiment. The different areas of the brain that were sequenced: Cerebellum, Cortex, nigra and striatum. Transgenic mice underwent an experiment where they were either exposed to the treatment or did not undergo a treatment (negative control). The treatment was 12 weeks of treadmill exercise. 
+
+4.	How many biological replicates are available for each sample?
+ 12
+
+5.	How are you going to analyze the dataset?  
+What statistical methods are you going to use? 
+In my approach of analyzing the gene expression levels in the cortex samples of this experiment, I will first normalize the data if it is not already normalized. Then filter out the low expression values and compare the control to the treatment to look for significant increases in gene expression in the treatment group. Assuming there is a significant increase in expression in the treatment group, this will be followed by an ANOVA analysis to compare the average variances of the expression values. This will determine if the expression values of certain genes were changed due to the treatment in two types of brain tissue, using the p-value. From here, I will analyze the GO-terms of highly expressed genes to what specific functions are affected by the treatment.
+
+
+
+extract raw data by downloading the ftp link of the data from the GEO page for this experiment, found at the bottom of the page.
+download metadata for the file to know which sample belongs to which conditions in series matrix files.or access metadata from SRA.
+reference: https://hbctraining.github.io/Accessing_public_genomic_data/lessons/accessing_public_experimental_data.html
+
+goal is to perform differential expression analysis.
+
+```{r}
+library(GEOquery)
+```
+use the query id 
+extracted the raw read counts from the original matrix
+```{r}
+gse_brain = getGEO("GSE205907")
+
+```
+
+
+
+
+extract the raw readcounts from the original matrix. downloaded the excel file GSE205907_fpkm and converted to txt, tab delimiter.
+```{r}
+GSE205907.raw.fixed = read.delim("/Users/jessi/OneDrive/Desktop/Special topics for bioinformatics/GSE205907_fpkm.txt", header = TRUE)
+```
+
+
+
+
+
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("org.Mm.eg.db")
+
+
+```{r}
+library(org.Mm.eg.db)
+
+
+columns(org.Mm.eg.db)
+```
+
+
+
+
+##annotation dvi documentation: convert gene id to entrez id. mouse annotation dvi
+
+we want the data only with Cortex and cerebellum tissue samples.i.e. contains "Cereb" or "Corte"
+use grep
+
+create data frame from the imported data set with just the columns that have "Cereb" and "Corte".Use grep to find the specific columns. then combine into one df.
+fyi: this gets the column locations: grep("Cereb", names(GSE205907.raw.fixed))
+```{r readdata}
+readcount_Cereb=GSE205907.raw.fixed[grep("Cereb", names(GSE205907.raw.fixed))]
+readcount_Corte=GSE205907.raw.fixed[grep("Corte", names(GSE205907.raw.fixed))]
+readcount_brain=cbind.data.frame(readcount_Cereb, readcount_Corte)
+
+```
+
+
+
+
+
+
+
+remove duplicate gene names, (tell the system how many replicates there are) -> 12 of each sample type.
+
+use factor for replicates
+
+samples: MPTP+exercise 
+control: Saline, MPTP
+
+create a model with all three together where  MPTP+exercise is first. MTPT used as baseline. 
+examples of how to run 3 levels in deseq
+
+```{r}
+expgroup_Cortex=data.frame(factor(c(rep("AMPTP+exercise", 4, ), rep("Saline", 4), rep("MPTP", 4))))
+expgroup_Cereb=data.frame(factor(c(rep("AMPTP+exercise", 4, ), rep("Saline", 4), rep("MPTP", 4))))
+```
+
+separate by tissue type. 
+
+make row names of expgroup_brain the column names of readcount_brain
+
+
+
+```{r}
+rownames(expgroup_Cortex)=colnames(readcount_Corte)
+
+rownames(expgroup_Cereb)=colnames(readcount_Cereb)
+```
+
+make second column name 'treatment'
+```{r}
+colnames(expgroup_Cereb)='treatment'
+colnames(expgroup_Cortex)='treatment'
+
+```
+
+
+
+
+
+do separate analysis for the two types of controls. percentage of expression.
+```{r}
+library(DESeq2)
+```
+create a Counts Dataset Matrix using the command **DESeqDataSetFromMatrix()** and call it **cds_brain**.
+```{r}
+
+cds_Cereb<- DESeqDataSetFromMatrix(countData = round(readcount_Cereb),
+                              colData = expgroup_Cereb,
+                              design= ~ treatment)
+
+
+cds_Cortex<- DESeqDataSetFromMatrix(countData = round(readcount_Corte),
+                              colData = expgroup_Cortex,
+                              design= ~ treatment)
+
+```
+combining counts from replicates into single columns.
+
+```{r}
+cds_Cereb <- DESeq(cds_Cereb)
+cds_Cortex <- DESeq(cds_Cortex)
+```
+
+```{r}
+resultsNames(cds_Cereb)
+```
+```{r}
+resultsNames(cds_Cortex)
+```
+
+```{r}
+treatment_res_Cereb_MPTP <- results(cds_Cereb, name = "treatment_MPTP_vs_AMPTP.exercise")
+treatment_res_Cereb_Saline<- results(cds_Cereb, name = "treatment_Saline_vs_AMPTP.exercise")
+treatment_res_Cortex_Saline <- results(cds_Cortex, name = "treatment_Saline_vs_AMPTP.exercise")
+treatment_res_Cortex_MPTP<- results(cds_Cortex, name = "treatment_MPTP_vs_AMPTP.exercise")
+```
+
+
+```{r}
+dim(subset(treatment_res_Cereb_MPTP, pvalue < 1 & log2FoldChange > 1))
+dim(subset(treatment_res_Cereb_Saline, pvalue < 1 & log2FoldChange > 1))
+dim(subset(treatment_res_Cortex_MPTP, pvalue < 1 & log2FoldChange > 1))
+dim(subset(treatment_res_Cortex_Saline, pvalue < 1 & log2FoldChange > 1))
+```
+removing low expressed genes.must set an expression level cut off. 
+```{r}
+genesum_Cereb = rowSums(readcount_Cereb)
+genesum_Cortex = rowSums(readcount_Corte)
+```
+
+```{r}
+hist(log2(genesum_Cereb+1))
+sum(genesum_Cereb == 0)
+data_filt_Cereb = subset(readcount_Cereb, genesum_Cereb>30)
+
+
+hist(log2(genesum_Cortex+1))
+sum(genesum_Cortex == 0)
+data_filt_Cortex = subset(readcount_Corte, genesum_Cortex>30)
+```
+
+
+
+Wald test
+use statistical testing to decide whether a given gene has a significant difference in read counts(level of gene expression), that is, whether it is greater than what would be expected due to natural random variation (control samples).
+Null: no differential expression across sample groups.
+
+
+
+
+```{r}
+dds2_Cortex <- DESeqDataSetFromMatrix(countData = round(data_filt_Cortex),
+                              colData = expgroup_Cortex,
+                              design= ~ treatment)
+
+dds2_Cortex <- DESeq(dds2_Cortex)
+treatment_res2_Cortex <- results(dds2_Cortex, name="treatment_MPTP_vs_AMPTP.exercise")
+treatment_up_Cortex = subset(treatment_res2_Cortex, pvalue < 1 & log2FoldChange > 1)
+treatment_down_Cortex = subset(treatment_res2_Cortex, pvalue < 1 & log2FoldChange < -1)
+treatment_all_Cortex = rbind(treatment_up_Cortex,treatment_down_Cortex)
+dim(treatment_all_Cortex)
+
+
+dds2_Cereb <- DESeqDataSetFromMatrix(countData = round(data_filt_Cereb),
+                              colData = expgroup_Cereb,
+                              design= ~ treatment)
+
+dds2_Cereb <- DESeq(dds2_Cereb)
+treatment_res2_Cereb <- results(dds2_Cereb, name="treatment_MPTP_vs_AMPTP.exercise")
+treatment_up_Cereb = subset(treatment_res2_Cereb, pvalue < 1 & log2FoldChange > 1)
+treatment_down_Cereb = subset(treatment_res2_Cereb, pvalue < 1 & log2FoldChange < -1)
+treatment_all_Cereb = rbind(treatment_up_Cereb,treatment_down_Cereb)
+dim(treatment_all_Cereb)
+```
+
+
+
+
+
+```{r}
+library(reshape)
+
+library(ggplot2)
+```
+
+Use the functions **estimateSizeFactors** and **estimateDispersions** so that Deseq2 can correct for size of library and estimates the dispersion. Plot the dispersion using **plotDispEsts**.
+
+Tells you how spread the data is. 
+how much the expression level of each gene deviates from the mean expression level of all genes.
+if dispersion is high, this means the expression level of a gene is higher than the mean.
+```{r}
+ddsCereb=estimateSizeFactors(dds2_Cereb)
+estimateDispersions(ddsCereb)
+plotDispEsts(ddsCereb)
+
+ddsCortex=estimateSizeFactors(dds2_Cortex)
+estimateDispersions(ddsCortex)
+plotDispEsts(ddsCortex)
+```
+ inversely related. 
+
+groups = treatments
+If there’s higher between-group variance relative to within-group variance, the groups are likely to be different as a result of the treatment (exercise). If not, then the results may be from individual differences of treatment.
+
+
+Perform the Differential expression and obtain the results using **DESeq** and **results** functions.
+
+get a ratio of the between-group variance of final scores and the within-group variance of final scores (F-statistic). With a large F-statistic, you find the corresponding p-value, and conclude that the groups are significantly different from each other.
+```{r}
+res_Cereb=results(dds2_Cereb)
+res_Cortex=results(dds2_Cortex)
+res_Cereb
+summary(res_Cortex)
+```
+
+How many genes have an adjusted p-value of less than 0.05 and log2FoldChange greater than 1 or less than -1 ? 
+Save this list of genes as **diffexpgenes_brain**
+
+```{r}
+
+pval_less_1_Cereb= length(which(res_Cereb$pvalue < 1))
+pval_less_1_Cereb
+
+pval_less_1_Cortex= length(which(res_Cortex$pvalue < 1))
+pval_less_1_Cortex
+
+```
+
+```{r}
+fold_change1Cereb=length(which(res_Cereb$log2FoldChange < 0))
+fold_change2Cereb=length(which(res_Cereb$log2FoldChange > 0))
+fold_change1Cereb
+fold_change2Cereb
+```
+```{r}
+diffexpgenes_Cereb=c(pval_less_1_Cereb, fold_change1Cereb, fold_change2Cereb)
+```
+There are 2 genes that have a pvalue less than 0.05 and a log fold change less than -1.
+
+There are 11 genes that have a pvalue less than 0.05 and a log fold change greater than 1.
+
+```{r}
+fold_change1Cortex=length(which(res_Cortex$log2FoldChange < 0))
+fold_change2Cortex=length(which(res_Cortex$log2FoldChange > 0))
+```
+```{r}
+diffexpgenes_Cortex=c(pval_less_1_Cortex, fold_change1Cortex, fold_change2Cortex)
+```
+
+
+Get normalized values of counts data in cds_brain using counts() function with
+option normalized=T.
+
+```{r}
+normvalues_Cereb = counts(dds2_Cereb, normalized=TRUE)
+normvalue_wname = normvalues_Cereb
+normvalue_wname = as.data.frame(normvalue_wname)
+normvalue_wname$gene = rownames(normvalues_Cereb)
+norm_melt_Cereb = melt(normvalue_wname)
+```
+
+```{r}
+normvalues_Cortex = counts(dds2_Cortex, normalized=TRUE)
+normvalue_wname = normvalues_Cortex
+normvalue_wname = as.data.frame(normvalue_wname)
+normvalue_wname$gene = rownames(normvalues_Cortex)
+norm_melt_Cortex = melt(normvalue_wname)
+```
+
+Create new matrix or dataframe that contains the expression values from normvalues_brain for just
+the diffexpgenes and call it diffexpvalues_brain.
+
+```{r}
+diffexpvalues_Cereb=data.frame(norm_melt_Cereb)
+
+
+diffexpvalues_Cortex=data.frame(norm_melt_Cortex)
+
+```
+
+Cluster the differentially expressed genes using hierarchical clustering and use the cutree
+function to create 8 groups. How many genes are in each group? is 8 groups optimal for this experiment?
+
+
+
+```{r}
+interaction_all_normvalues_Cortex = normvalues_Cortex[treatment_all_Cortex@rownames,]
+
+interact_sig_dist = as.dist(1 - cor(t(interaction_all_normvalues_Cortex)))
+interact_sig_hclust_Cortex = hclust(interact_sig_dist,
+                             method="average")
+plot(interact_sig_hclust_Cortex)
+```
+
+
+```{r}
+interaction_all_normvalues_Cereb = normvalues_Cereb[treatment_all_Cereb@rownames,]
+
+interact_sig_dist = as.dist(1 - cor(t(interaction_all_normvalues_Cereb)))
+interact_sig_hclust_Cereb = hclust(interact_sig_dist,
+                             method="average")
+plot(interact_sig_hclust_Cereb)
+```
+
+
+
+
+```{r}
+plot(interaction_all_normvalues_Cortex)
+```
+
+```{r}
+interact_sig_hclust_cut=cutree(interact_sig_hclust_Cereb, k = 4)
+
+interact_sig_hclust_g1= normvalues_brain[names(which(interact_sig_hclust_cut==1)),]
+interact_sig_hclust_g2= normvalues_brain[names(which(interact_sig_hclust_cut==2)),]
+interact_sig_hclust_g3= normvalues_brain[names(which(interact_sig_hclust_cut==3)),]
+interact_sig_hclust_g4= normvalues_brain[names(which(interact_sig_hclust_cut==4)),]
+
+
+length(interact_sig_hclust_g1)
+length(interact_sig_hclust_g2)
+length(interact_sig_hclust_g3)
+length(interact_sig_hclust_g4)
+
+```
+number of genes in each group ^
+
+
+```{r}
+interact_sig_hclust_cut=cutree(interact_sig_hclust_Cortex, k = 8)
+
+interact_sig_hclust_g1= normvalues_Cortex[names(which(interact_sig_hclust_cut==1)),]
+interact_sig_hclust_g2= normvalues_brain[names(which(interact_sig_hclust_cut==2)),]
+interact_sig_hclust_g3= normvalues_brain[names(which(interact_sig_hclust_cut==3)),]
+interact_sig_hclust_g4= normvalues_brain[names(which(interact_sig_hclust_cut==4)),]
+interact_sig_hclust_g5= normvalues_brain[names(which(interact_sig_hclust_cut==5)),]
+interact_sig_hclust_g6= normvalues_brain[names(which(interact_sig_hclust_cut==6)),]
+interact_sig_hclust_g7= normvalues_brain[names(which(interact_sig_hclust_cut==7)),]
+interact_sig_hclust_g8= normvalues_brain[names(which(interact_sig_hclust_cut==8)),]
+
+length(interact_sig_hclust_g1)
+length(interact_sig_hclust_g2)
+length(interact_sig_hclust_g3)
+length(interact_sig_hclust_g4)
+length(interact_sig_hclust_g5)
+length(interact_sig_hclust_g6)
+length(interact_sig_hclust_g7)
+length(interact_sig_hclust_g8)
+```
+
+
+Create a heatmap of all the genes using the **pheatmap** package. Some options you should pay attention to are:
+- scale ( scaling gene values shows expression pattern changes rather than magnitude)
+- cluster_rows ( define how the rows should be clustered)
+- annotation_col ( color code the different samples based on a category- health or cf)
+- annotation_row ( color code the different genes based on the cluster they belong to)
+
+
+```{r heatmap}
+library(pheatmap)
+```
+
+try looking at all differentially expressed genes.
+
+```{r}
+pheatmap(interaction_all_normvalues_Cereb, annotation_col = expgroup_Cereb,
+         scale="row", cluster_cols = T, show_rownames = F)
+```
+the columns are the different samples. rownames are genes. these genes look like they may be more sample dependent than treatment dependent.
+
+
+```{r}
+pheatmap(interaction_all_normvalues_Cortex, annotation_col = expgroup_Cortex,
+         scale="row", cluster_cols = T, show_rownames = T)
+```
+
+
+rows are the genes, columns are the sample types, blue and pink at the top show what treatment the sample got.
+
+treated sample and control are inversely related. exercise turns some genes on and some genes off.
+
+
+
+
+```{r}
+library(GOstats)
+library(GO.db)
+library(Category)
+library(org.At.tair.db)
+```
+determine which GO-terms are enriched in **diffexpvalues**
+
+
+
+
+
+make rownames or readcount into first column.
+Then change them to entrez id and put back as row names.
+
+
+```{r}
+library(tibble)
+readcount_Cereb <- tibble::rownames_to_column(readcount_Cereb, "VALUE")
+```
+
+
+convert the gene symbols to entrez id's 
+```{r}
+symbols <- c(GSE205907.raw.fixed$expr)
+
+genes_entrez=data.frame(mapIds(org.Mm.eg.db, symbols, 'ENTREZID', 'SYMBOL'))
+
+```
+
+
+add the entrez id's to readcount. cannot make entrez id's the row names because there are duplicates, "NA".
+append the entrez id's to a new column and use this later on for the go terms.
+```{r}
+readcount_Cereb$ENTREZ_ID <- c(genes_entrez$mapIds.org.Mm.eg.db..symbols...ENTREZID....SYMBOL..)
+
+
+readcount_Corte$ENTREZ_ID <- c(genes_entrez$mapIds.org.Mm.eg.db..symbols...ENTREZID....SYMBOL..)
+
+```
+use ENTREZ_ID from readcount 
+
+```{r}
+
+params=new("GOHyperGParams", 
+  geneIds=rownames(diffexpvalues_Cereb), 
+  universeGeneIds=(readcount_Cereb$ENTREZ_ID), 
+  annotation="org.Mm.eg.db", 
+  ontology="BP", 
+  pvalueCutoff=0.001, 
+  conditional=TRUE, 
+  testDirection="over")
+
+
+```
+```{r}
+(overRepresented_Cereb=hyperGTest(params))
+
+results_cereb=summary(overRepresented_Cereb)
+View(results_cereb)
+```
+
+```{r}
+fit = plot(barplot(results_cereb, showCategory = 20))
+fit
+```
+
+
+
+```{r}
+
+params=new("GOHyperGParams", 
+  geneIds=rownames(diffexpvalues_Cortex), 
+  universeGeneIds=rownames(readcount_Corte$ENTREZ_ID), 
+  annotation="org.Mm.eg.db", 
+  ontology="BP", 
+  pvalueCutoff=0.001, 
+  conditional=TRUE, 
+  testDirection="over")
+
+
+```
+
+```{r}
+(overRepresented_Cortex=hyperGTest(params))
+
+
+```
+
+plot the go terms and their expression levels
+GO term on Y-axis and count on X-axis
+```{r}
+termGraphs(overRepresented_Cereb, id = NULL, pvalue = NULL, use.terms = TRUE)
+g=inducedTermGraph(overRepresented_Cereb, names(pvalues(overRepresented_Cereb)[1000]), children = TRUE, parents = TRUE)
+plotGOTermGraph(g, Term = TRUE, add.counts = TRUE, max.nchar = 20,
+                node.colors=c(sig="lightgray", not="white"),
+                node.shape="plaintext")
+```
+
+```{r}
+Cereb_dag <- dagify(cardiacarrest ~ cholesterol,
+       cholesterol ~ smoking + weight,
+       smoking ~ unhealthy,
+       weight ~ unhealthy,
+       labels = c("cardiacarrest" = "Cardiac\n Arrest", 
+                  "smoking" = "Smoking",
+                  "cholesterol" = "Cholesterol",
+                  "unhealthy" = "Unhealthy\n Lifestyle",
+                  "weight" = "Weight"),
+       latent = "unhealthy",
+       exposure = "smoking",
+       outcome = "cardiacarrest")
+
+ggdag(smoking_ca_dag, text = FALSE, use_labels = "label")
+```
+
+
+
+
+do a pathway analysis(enrichment map)
+
+https://yulab-smu.top/biomedical-knowledge-mining-book/enrichplot.html
+
+```{r}
+library(DOSE)
+```
+
+```{r}
+data(overRepresented_Cereb)
+de <- names(geneList)[abs(geneList) > 2]
+
+edo <- enrichDGN(de)
+```
+
+
+
+
+
+focus on how you did the analysis in the presentation. each step. if i had more time, this is what i would do.
+
+provide a link to your video.
+
+
